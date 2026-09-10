@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voice-type"
+version = "0.1.0"
+description = "Local, offline, system-wide voice dictation for Ubuntu (X11)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "openai-whisper",
+    "Pillow",
+    "python-xlib",
+]
+
+[project.scripts]
+voice-type = "voice_type.main:main"
+
+[tool.setuptools]
+packages = ["voice_type"]
