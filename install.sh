@@ -44,6 +44,18 @@ if [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
     echo "         X11 only (xdotool paste does not work reliably on Wayland)." >&2
 fi
 
+echo "==> Checking for interrupted package installs"
+# A previously interrupted apt/dpkg run (power loss, Ctrl+C mid-install,
+# etc.) leaves packages half-configured, and every apt-get afterwards fails
+# until this is repaired. Safe to run even when nothing is broken.
+if ! sudo dpkg --configure -a; then
+    echo "" >&2
+    echo "ERROR: dpkg has interrupted/broken packages that could not be repaired" >&2
+    echo "automatically. Fix this first, then re-run this installer:" >&2
+    echo "  sudo dpkg --configure -a" >&2
+    exit 1
+fi
+
 echo "==> Installing system packages (sudo required)"
 # Tolerate failures from unrelated third-party apt repos already configured
 # on this machine (e.g. broken PPAs) -- we only need the official Ubuntu
@@ -102,8 +114,25 @@ case ":$PATH:" in
 esac
 
 echo "==> Configuring keyboard shortcut (Ctrl+Alt+Space)"
-if command -v gsettings >/dev/null 2>&1; then
-    UPDATED_LIST=$(python3 - "$SCHEMA_BASE" "$CUSTOM_PATH" <<'PYEOF'
+# Check the exact schemas exist before touching them -- `gsettings` can be
+# present (e.g. on a minimal/non-GNOME X11 setup) while the GNOME
+# media-keys schemas it needs are not installed, which would otherwise
+# fail with a "No such schema" error instead of falling back cleanly.
+SCHEMAS_OK=false
+if command -v gsettings >/dev/null 2>&1 \
+    && gsettings list-schemas | grep -qx "$SCHEMA_BASE" \
+    && gsettings list-relocatable-schemas | grep -qx "$KEYBINDING_SCHEMA"; then
+    SCHEMAS_OK=true
+fi
+
+SHORTCUT_DONE=false
+if [ "$SCHEMAS_OK" = true ]; then
+    # Wrapped in this `if` (rather than run as plain top-level commands) so
+    # that a failure here -- e.g. a transient dbus/gsettings error -- can't
+    # abort the whole installer via `set -e`. The package/command install
+    # above has already succeeded at this point regardless of what happens
+    # to the shortcut.
+    if UPDATED_LIST=$(python3 - "$SCHEMA_BASE" "$CUSTOM_PATH" <<'PYEOF'
 import ast
 import subprocess
 import sys
@@ -124,17 +153,28 @@ if path not in current:
 
 print(repr(current))
 PYEOF
-    )
-    gsettings set "$SCHEMA_BASE" custom-keybindings "$UPDATED_LIST"
-    gsettings set "$CUSTOM_URI" name "Voice Type"
-    gsettings set "$CUSTOM_URI" command "$BIN_LINK"
-    gsettings set "$CUSTOM_URI" binding "<Control><Alt>space"
-    echo "Shortcut configured: Ctrl+Alt+Space -> voice-type"
-else
+        ) \
+        && gsettings set "$SCHEMA_BASE" custom-keybindings "$UPDATED_LIST" \
+        && gsettings set "$CUSTOM_URI" name "Voice Type" \
+        && gsettings set "$CUSTOM_URI" command "$BIN_LINK" \
+        && gsettings set "$CUSTOM_URI" binding "<Control><Alt>space"; then
+        echo "Shortcut configured: Ctrl+Alt+Space -> voice-type"
+        SHORTCUT_DONE=true
+    else
+        echo "Warning: automatic shortcut registration failed partway through." >&2
+    fi
+fi
+
+if [ "$SHORTCUT_DONE" != true ]; then
     cat <<EOF
-gsettings not found -- skipping automatic shortcut setup.
-Configure it manually: Settings > Keyboard > View and Customize Shortcuts >
-Custom Shortcuts, with command "$BIN_LINK" bound to Ctrl+Alt+Space.
+Automatic shortcut setup is unavailable on this system (required GNOME
+schema not found, or registration failed). Configure it manually:
+Settings > Keyboard > View and Customize Shortcuts > Custom Shortcuts:
+  Name:     Voice Type
+  Command:  $BIN_LINK
+  Shortcut: Ctrl+Alt+Space
+Use that exact command path -- it must be the full absolute path shown
+above, since GNOME's shortcut dialog does not expand "~".
 EOF
 fi
 
