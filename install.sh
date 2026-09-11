@@ -10,7 +10,24 @@
 #      touching any other custom shortcuts you already have.
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_URL="https://github.com/sunilkmwtt/ubuntu-voice-type.git"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" 2>/dev/null && pwd || pwd)"
+
+if [ -f "$SCRIPT_DIR/pyproject.toml" ] && [ -d "$SCRIPT_DIR/voice_type" ]; then
+    # Running from an actual checkout (e.g. `git clone` then `./install.sh`).
+    REPO_DIR="$SCRIPT_DIR"
+else
+    # Running standalone (e.g. `curl -fsSL .../install.sh | bash`) -- fetch
+    # the source into a throwaway directory. Nothing here depends on this
+    # directory afterwards: the venv + package end up under $INSTALL_DIR,
+    # so this clone can be safely deleted once the install finishes.
+    echo "==> Fetching Voice Type source"
+    command -v git >/dev/null 2>&1 || { echo "git is required. Install it first: sudo apt install git" >&2; exit 1; }
+    REPO_DIR="$(mktemp -d)"
+    trap 'rm -rf "$REPO_DIR"' EXIT
+    git clone --depth 1 "$REPO_URL" "$REPO_DIR"
+fi
+
 INSTALL_DIR="$HOME/.local/share/voice-type"
 BIN_DIR="$HOME/.local/bin"
 BIN_LINK="$BIN_DIR/voice-type"
